@@ -24,91 +24,74 @@ for title,start,end in SECTIONS:
         duration=(end-start)*w/sum(weights)
         effect='shake' if '駆除' in txt or 'とって' in txt else ('wave' if any(s in txt for s in ['いきもの','いきて','きこえる','いる。']) else 'soft')
         pages.append(dict(start=t,end=t+duration,text=txt,chapter=title,effect=effect));t+=duration
-# One shared schedule drives both glyph appearance and voice blips.
+# Directed pauses: reveal and silence are explicit, not a fixed typing rate.
+last_subject='soil'
 for page in pages:
-    offsets=[]; clock=.08
-    for ch in page['text']:
+    text=page['text']
+    for word,subject in [('スギナ。','sugina'),('カラスノエンドウ。','pea'),('ナナホシテントウ。','beetle'),('ヒラタアブ。','fly'),('ミミズ。','worm')]:
+        if word in text:last_subject=subject
+    if 'ぜんぶ、' in text:last_subject='soil'
+    page['subject']=last_subject
+    key=any(k in text for k in ['「駆除」','ころせない','てき は','── ちがう。','しずかに して。','きこえる。','いきて いる'])
+    clock=.52 if key else .16
+    offsets=[]
+    for ch in text:
         offsets.append(clock)
-        clock += .20 if ch in '。、' else .16 if ch == '\n' else .025 if ch.isspace() else .075
-    budget=(page['end']-page['start'])*.76
-    scale=min(1,budget/max(clock,.01))
+        clock += .32 if ch in '。、' else .24 if ch=='\n' else .035 if ch.isspace() else .115 if key else .085
+    available=page['end']-page['start']
+    scale=min(1,(available-(1.05 if key else .65))/max(clock,.01))
     page['reveal_times']=[round(x*scale,6) for x in offsets]
+    page['music_silence']=any(k in text for k in ['しずかすぎる','ころせない','わたし ひとり','しずかに して。','きこえる。'])
 (ROOT/'timeline.json').write_text(json.dumps(pages,ensure_ascii=False,indent=2))
 font=ImageFont.truetype(FONT,19); small=ImageFont.truetype(FONT,10); titlefont=ImageFont.truetype(FONT,36)
-# Hand-authored sprite patterns, exported separately for reuse.
-SPRITES={
-'person':['...hhh...','..hhhhh..','...ss....','..sssss..','...ss....','..bbbbb..','.bbbbbbb.','.sbbbbb s'.replace(' ',''),'..bbbbb..','..ppppp..','..pp.pp..','..pp.pp..','.kkk.kkk.'],
-'plant':['...g...','..gg.g.','g.gg.g.','.gggg..','...g...','..gggg.','.g.g...','...g...'],
-'beetle':['..k.k..','...k...','..rrrr.','.rkrkrr','krrrrrk','.rkrkr.','..kkkk.'],
-'worm':['.......','pp.....','.pp..pp','..pppp.','.......'],
-'fly':['ww...ww','.wwwww.','..kyk..','.kykyk.','..kyk..','...k...']}
-colors={'h':'#453c36','s':'#dec9a4','b':'#b7bcb1','p':'#ad817b','k':'#292e35','g':'#83a676','r':'#c77164','w':'#cdd8c6','y':'#cfb778'}
-def sprite(im,name,x,y,scale=2):
- d=ImageDraw.Draw(im)
- for yy,row in enumerate(SPRITES[name]):
-  for xx,c in enumerate(row):
-   if c in colors:d.rectangle((x+xx*scale,y+yy*scale,x+(xx+1)*scale-1,y+(yy+1)*scale-1),fill=colors[c])
-for name in SPRITES:
- im=Image.new('RGBA',(40,40));sprite(im,name,2,2,2);im.save(ROOT/'assets'/f'{name}.png')
+from battle import SUBJECTS,draw_subject,subject_for
+for name,sprite in SUBJECTS.items():sprite.save(ROOT/'assets'/f'battle-{name}.png')
+
 def frame(t):
- im=Image.new('RGB',(640,360),'#080c12');d=ImageDraw.Draw(im)
- # restrained stars and distant mountain silhouettes
- for i in range(48):
-  x=(i*127+23)%640;y=(i*43+9)%140
-  c=int(75+35*math.sin(t*.5+i));d.point((x,y), fill=(c,c,c+12))
- d.polygon([(0,171),(80,128),(137,162),(219,116),(306,173),(390,132),(490,165),(570,121),(640,152),(640,210),(0,210)],fill='#121a21')
- living=t<42 or t>=64; green=t>=157
- ground='#343b2b' if green else '#302922'
- if 45<t<64:ground='#8c918c'
- d.rectangle((0,196,639,237),fill=ground)
- for i in range(95):
-  x=(i*83+8)%640;y=200+(i*17)%35;d.rectangle((x,y,x+2,y+1),fill='#544637' if living else '#afb2a9')
- if living:
-  for i in range(20):
-   x=(i*67+13)%640
-   sprite(im,'plant',x,182+(i%3)*3,2 if green else 1)
-   if green:d.line((x+6,205,x+2+(i%4)*3,224),fill='#7c7251',width=1)
- # spotlight / protagonist
- d.ellipse((284,190,350,201),fill='#857b5a' if t<34 or t>=214 else '#535644')
- sprite(im,'person',307,164+int(math.sin(t*2)*.7),2)
- if 64<=t<113:
-  n=min(4,int((t-64)/7))
-  sprite(im,['plant','plant','beetle','fly','worm'][n],393,151+int(math.sin(t*2)*2),4)
- if 184<=t<214:
-  # wordless original interlude: seed -> roots -> pollination -> seed
-  p=(t-184)/30
-  d.text((34,35),'土から、また。',font=font,fill='#c6d7ae')
-  for i in range(7):sprite(im,'fly',80+i*74+int(math.sin(t+i)*10),120+int(math.cos(t*.8+i)*18),2)
-  for i in range(8):d.line((40+i*80,214,50+i*80,235),fill='#9ea67b',width=2)
- if t<8:
-  # Establish title gradually, then hold before dialogue.
-  d.text((230,80),'ここにいる',font=titlefont,fill='#e3e3d3')
-  d.text((237,131),'土と、名前と、わたしたち。',font=small,fill='#97a28f')
+ im=Image.new('RGB',(640,360),'black');d=ImageDraw.Draw(im)
  page=next((p for p in pages if p['start']<=t<p['end']),None)
  if page:
-  d.rectangle((24,245,615,343),fill='#080b10',outline='#dce2d5',width=2)
-  d.rectangle((28,249,611,339),outline='#404944')
-  d.text((36,230),page['chapter'],font=small,fill='#a6b897')
-  elapsed=t-page['start']; chars=bisect.bisect_right(page['reveal_times'],elapsed); idx=0
+  index=pages.index(page)
+  name=subject_for(page)
+  prev=subject_for(pages[index-1]) if index else None
+  age=t-page['start']
+  # Six-frame black beat when the object of attention changes.
+  if prev==name or age>.25:draw_subject(im,name,t,age)
+  d.rectangle((24,228,615,345),outline='#eeeeee',width=3)
+  d.text((41,243),'＊',font=font,fill='#eeeeee')
+  elapsed=t-page['start'];chars=bisect.bisect_right(page['reveal_times'],elapsed);idx=0
   for row,line in enumerate(page['text'].split('\n')):
-   if row:idx+=1  # newline has a timed pause but no visible glyph
+   if row:idx+=1
    for col,ch in enumerate(line):
     if idx>=chars:break
     dx=dy=0
-    if page['effect']=='wave':dy=math.sin(t*4+idx*.65)*1.5
-    elif page['effect']=='shake' and elapsed<.55:dx=math.sin(t*60+idx)*2;dy=math.cos(t*49+idx)*2
-    d.text((44+col*19+dx,256+row*25+dy),ch,font=font,fill='#f0eee1');idx+=1
-  if elapsed>page['reveal_times'][-1]+.2 and int(t*2)%2:d.polygon([(594,325),(602,325),(598,329)],fill='#bacaad')
+    if page['effect']=='wave':dy=round(math.sin(t*3+idx*.5)*1)
+    when=page['reveal_times'][idx]
+    if page['effect']=='shake' and 0<elapsed-when<.25:
+     dx=round(math.sin(t*55+idx)*2);dy=round(math.cos(t*43+idx)*2)
+    d.text((72+col*18+dx,244+row*29+dy),ch,font=font,fill='#eeeeee');idx+=1
+  if elapsed>page['reveal_times'][-1]+.45 and int(t*2)%2:
+   d.polygon([(594,330),(602,330),(598,334)],fill='#eeeeee')
+ elif t<8:
+  if t>1.5:draw_subject(im,'soil',t)
+  if t>3:
+   d.rectangle((24,228,615,345),outline='white',width=3)
+   d.text((227,252),'ここにいる',font=titlefont,fill='#eeeeee')
  elif 184<=t<214:
-  d.text((36,269),'INTERLUDE  /  めぐる',font=font,fill='#dce2cd')
-  d.text((36,306),'くさ が かれて、つち に なって、また。',font=small,fill='#9caa92')
- if t>228:
-  im=Image.blend(im,Image.new('RGB',im.size),min(1,(t-228)/2))
+  phase=int((t-184)//6)
+  draw_subject(im,['seed','sprout','fly','bare','living_soil'][min(4,phase)],t)
+  d.rectangle((24,228,615,345),outline='#eeeeee',width=3)
+  labels=['たね。','めが でる。','はこぶ もの が、いる。','つち に かえる。','また、はじまる。']
+  d.text((48,254),'＊ '+labels[min(4,phase)],font=font,fill='#eeeeee')
+ if t>228:im=Image.blend(im,Image.new('RGB',im.size),min(1,(t-228)/2))
  return im
 from sound import render_audio as audio
 if __name__=='__main__':
  ap=argparse.ArgumentParser();ap.add_argument('--preview',action='store_true');ap.add_argument('--fps',type=int,default=24);args=ap.parse_args()
  duration=15 if args.preview else 230
+ def stamp(t):
+  ms=round(t*1000);return f'{ms//3600000:02}:{ms//60000%60:02}:{ms//1000%60:02},{ms%1000:03}'
+ (OUT/'subtitles.srt').write_text('\n\n'.join(f"{i}\n{stamp(p['start'])} --> {stamp(p['end'])}\n{p['text']}" for i,p in enumerate(pages,1))+'\n')
  audio(duration, pages, ROOT)
  cmd=['ffmpeg','-y','-loglevel','error','-f','rawvideo','-pix_fmt','rgb24','-s','640x360','-r',str(args.fps),'-i','pipe:0','-i',str(OUT/'soundtrack.wav'),'-vf','scale=1280:720:flags=neighbor','-c:v','libx264','-preset','veryfast','-crf','20','-pix_fmt','yuv420p','-c:a','aac','-b:a','160k','-movflags','+faststart','-shortest',str(OUT/('preview.mp4' if args.preview else 'koko-ni-iru.mp4'))]
  p=subprocess.Popen(cmd,stdin=subprocess.PIPE)
@@ -118,5 +101,5 @@ if __name__=='__main__':
    if n%(30*args.fps)==0:print(f'{n/args.fps:.0f}/{duration}s',flush=True)
  finally:p.stdin.close()
  if p.wait():raise SystemExit('ffmpeg failed')
- frame(89).resize((1280,720),Image.Resampling.NEAREST).save(OUT/'still.png')
+ frame(79.8).resize((1280,720),Image.Resampling.NEAREST).save(OUT/'still.png')
  print('Rendered',duration,'seconds',flush=True)

@@ -39,7 +39,7 @@ def render_audio(duration,pages,root):
         # A pitched pulse through three vocal resonances, not a piercing key beep.
         emph='駆除' in p['text']
         whisper='──' in p['text'] or 'ころせない' in p['text']
-        base=112 if emph else 148 if whisper else 136
+        base=112 if emph else 148 if whisper else {'soil':132,'sugina':154,'pea':146,'beetle':176,'fly':163,'worm':118}.get(p.get('subject'),136)
         f0=base*2**(((ord(ch)%7)-3)/36)
         length=.046 if whisper else .055
         t=np.arange(int(SR*length))/SR
@@ -84,6 +84,26 @@ def render_audio(duration,pages,root):
         kick=np.sin(2*np.pi*(48*t+.875*(1-np.exp(-t/.025))))*np.exp(-t*23)*.17
         off=int(time*SR);length=min(len(t),n-off)
         music[off:off+length]+=(melody+kick)[:length,None]
+    # Directed silences are keyed to the actual last revealed glyph.
+    quiet=[]
+    def quiet_between(start,end,level=0):
+        lo=max(0,round(start*SR));hi=min(n,round(end*SR))
+        if hi<=lo:return
+        fade=min(round(.055*SR),(hi-lo)//3)
+        gain=np.full(hi-lo,level,dtype=np.float32)
+        if fade:
+            gain[:fade]=np.linspace(1,level,fade)
+            gain[-fade:]=np.linspace(level,1,fade)
+        music[lo:hi]*=gain[:,None]
+        quiet.append(dict(start=round(start,4),end=round(end,4),level=level))
+    quiet_between(0,1.5)
+    for p in pages:
+        if p.get('music_silence'):
+            quiet_between(p['start']+p['reveal_times'][-1]+.10,p['end'])
+        if '── ちがう。' in p['text']:
+            quiet_between(p['start']-.30,p['start']+p['reveal_times'][-1]+.15)
+        if p['text'].startswith('ごおくねん。'):
+            quiet_between(p['start'],p['start']+.65)
     mixed=music*duck[:,None]+voice[:,None]
     # Whole-track gain only; no hard clipping and no loudness jumps between sections.
     peak=float(np.max(np.abs(mixed)))
@@ -91,5 +111,5 @@ def render_audio(duration,pages,root):
     with wave.open(str(root/'output/soundtrack.wav'),'wb') as w:
         w.setnchannels(2);w.setsampwidth(2);w.setframerate(SR)
         w.writeframes((mixed*32767).astype('<i2').tobytes())
-    (root/'output/audio-cues.json').write_text(json.dumps(dict(sample_rate=SR,channels=2,bgm=report,voice_events=events,peak_before_gain=peak,final_gain=final_gain,drone_layer=False),ensure_ascii=False,indent=2))
+    (root/'output/audio-cues.json').write_text(json.dumps(dict(sample_rate=SR,channels=2,bgm=report,voice_events=events,peak_before_gain=peak,final_gain=final_gain,drone_layer=False,directed_silences=quiet),ensure_ascii=False,indent=2))
     return mixed
